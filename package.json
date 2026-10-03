@@ -1,0 +1,8 @@
+{
+  "name": "counterpart-rails",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "cOunTerPart rails: Delhivery mock, Pine Labs mock, Gnani + Google + WhatsApp MCP bridges",
+  "engines": { "node": ">=18" }
+}

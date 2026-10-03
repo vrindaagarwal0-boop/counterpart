@@ -1,0 +1,96 @@
+<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>cOunTerPart control panel</title>
+<style>
+body{font-family:Calibri,Arial,sans-serif;margin:0;background:#f6f7f9;color:#1b2440}
+header{background:#13294b;color:#fff;padding:12px 20px;display:flex;justify-content:space-between;align-items:center}
+header b{color:#d4a017}
+main{display:grid;grid-template-columns:1fr 1fr;gap:14px;padding:14px}
+section{background:#fff;border:1px solid #dde2ea;border-radius:8px;padding:12px 14px}
+h2{font-size:15px;margin:0 0 8px;color:#13294b}
+label{font-size:12px;color:#556}
+input,select,textarea{font:inherit;font-size:13px;padding:4px 6px;border:1px solid #c8cfda;border-radius:4px}
+button{font:inherit;font-size:12px;padding:5px 9px;border:1px solid #13294b;background:#13294b;color:#fff;border-radius:4px;cursor:pointer;margin:2px}
+button.alt{background:#fff;color:#13294b}button.warn{background:#a32d2d;border-color:#a32d2d}
+table{border-collapse:collapse;width:100%;font-size:12px}td,th{border-bottom:1px solid #eef;padding:3px 5px;text-align:left;vertical-align:top}
+.pill{display:inline-block;padding:1px 7px;border-radius:9px;font-size:11px;background:#eef1f6}
+.live{background:#fbe3e3;color:#a32d2d;font-weight:bold}.dry{background:#e3f4ea;color:#0f6e56;font-weight:bold}
+.full{grid-column:1/3}.scroll{max-height:320px;overflow:auto}.msg{border-bottom:1px solid #eef;padding:4px 0;font-size:12px}
+pre{font-size:11px;white-space:pre-wrap;background:#f4f6fa;padding:6px;border-radius:4px;max-height:220px;overflow:auto}
+</style></head><body>
+<header><div><b>cOunTerPart</b> control panel</div><div id="hdr"></div></header>
+<main>
+<section><h2>1. WhatsApp mode</h2>
+<div id="wa"></div>
+<button onclick="setMode('dry')" class="alt">Dry-run (free)</button>
+<button onclick="setMode('live')" class="warn">Live (spends Twilio messages)</button>
+<label>Budget <input id="budget" size="4"></label><button class="alt" onclick="setBudget()">Save budget</button>
+</section>
+<section><h2>2. Contacts</h2><table id="contacts"></table><button onclick="saveContacts()">Save contacts</button></section>
+
+<section><h2>3. Shipment</h2>
+<div><label>Item <input id="s_item" value="Cotton kurta"></label> <label>Seller <input id="s_seller" value="Myntra" size="8"></label></div>
+<div><label>Value Rs <input id="s_value" value="1299" size="6"></label> <label>COD Rs <input id="s_cod" value="1299" size="6"></label> <label><input type="checkbox" id="s_open"> Open-box</label></div>
+<div><label>Waybill (blank = auto) <input id="s_wb" size="15"></label> <button onclick="createShip()">Create shipment</button></div>
+<hr><label>Active waybill <select id="wbsel" onchange="render()"></select></label>
+<div id="shipview"></div>
+<div>
+<button class="alt" onclick="st('In Transit')">In Transit</button><button class="alt" onclick="st('Pending')">Reached hub</button>
+<button class="alt" onclick="st('Dispatched')">Out for delivery (assign rider)</button>
+<button class="alt" onclick="ndr()">Failed attempt (NDR)</button>
+<label>OTP from receiver <input id="otpin" size="5"></label><button onclick="deliver()">Mark delivered</button>
+</div></section>
+
+<section><h2>4. Fault switches</h2><table id="faults"></table>
+<div style="font-size:11px;color:#667">timeout = waits 12s (platform times out). malformed = broken JSON. no_rider = Delhivery shows no delivery agent. "Once" clears after one call.</div></section>
+
+<section><h2>5. Virtual phones (dry-run testing)</h2>
+<label>From <select id="vfrom"></select></label> <input id="vtext" placeholder="Type a reply" size="28">
+<button onclick="sendText()">Send text</button><br>
+<label>or voice note <input type="file" id="vfile" accept="audio/*"></label><button onclick="sendVoice()">Send voice</button>
+<h2 style="margin-top:10px">Agent's outgoing messages</h2><div id="outbox" class="scroll"></div></section>
+
+<section><h2>6. Incoming messages (inbox)</h2><div id="inbox" class="scroll"></div>
+<h2 style="margin-top:10px">Self-tests</h2>
+<button class="alt" onclick="selftest('google')">Google (free)</button><button class="alt" onclick="selftest('gnani')">Gnani TTS+STT (free)</button>
+<button class="warn" onclick="selftest('whatsapp')">WhatsApp: send 1 live test</button>
+<pre id="testout"></pre></section>
+
+<section class="full"><h2>7. Event log <button class="alt" onclick="dl()">Download JSON</button> <button class="warn" onclick="resetAll()">Reset demo data</button></h2>
+<div class="scroll"><table id="log"></table></div></section>
+</main>
+<script>
+var KEY=sessionStorage.getItem('k')||prompt('Enter MCP_API_KEY');sessionStorage.setItem('k',KEY);var S={};
+function api(n,b){return fetch('/panel/api/'+n,{method:b?'POST':'GET',headers:{'x-api-key':KEY,'Content-Type':'application/json'},body:b?JSON.stringify(b):undefined}).then(function(r){if(r.status==401){sessionStorage.removeItem('k');alert('Wrong key');location.reload()}return r.json()})}
+function esc(s){return String(s==null?'':s).replace(/[&<>]/g,function(c){return{'&':'&amp;','<':'&lt;','>':'&gt;'}[c]})}
+function audio(u){return u?'<audio controls preload="none" src="'+u+'" style="height:28px;vertical-align:middle"></audio>':''}
+function load(){api('state').then(function(s){S=s;render()})}
+function render(){var s=S;if(!s.contacts)return;
+document.getElementById('hdr').innerHTML='Redis: '+(s.redis?'on':'<b style="color:#f99">OFF (data lost on restart)</b>')+' | keys: '+Object.keys(s.env).map(function(k){return k+(s.env[k]?' ok':' missing')}).join(', ');
+var w=s.whatsapp;document.getElementById('wa').innerHTML='Mode: <span class="pill '+w.mode+'">'+w.mode.toUpperCase()+'</span> &nbsp; Live sent: <b>'+w.live_sent+'</b> / '+w.budget+' &nbsp; Live received: '+(w.live_received||0);
+if(document.activeElement.id!='budget')document.getElementById('budget').value=w.budget;
+if(!document.getElementById('contacts').contains(document.activeElement)){document.getElementById('contacts').innerHTML='<tr><th>key</th><th>name</th><th>language</th><th>WhatsApp number</th></tr>'+s.contacts.map(function(c,i){return '<tr><td>'+c.key+'</td><td><input id="cn'+i+'" value="'+esc(c.name)+'" size="12"></td><td><input id="cl'+i+'" value="'+esc(c.language)+'" size="5"></td><td><input id="cp'+i+'" value="'+esc(c.phone)+'" size="13"></td></tr>'}).join('');}
+var vf=document.getElementById('vfrom'),vfc=vf.value;vf.innerHTML=s.contacts.map(function(c){return '<option>'+c.key+'</option>'}).join('')+'<option value="stranger">stranger (not on list)</option>';if(vfc)vf.value=vfc;
+var sel=document.getElementById('wbsel'),cur=sel.value;sel.innerHTML=s.shipments.map(function(x){return '<option>'+x.waybill+'</option>'}).join('');if(cur)sel.value=cur;
+var sh=s.shipments.find(function(x){return x.waybill==sel.value});
+document.getElementById('shipview').innerHTML=sh?('<table><tr><td>Status</td><td><b>'+sh.status+'</b> ('+esc(sh.instructions)+')</td></tr><tr><td>Consignee</td><td>'+esc(sh.consignee.name)+' '+sh.consignee.phone+'</td></tr><tr><td>Payment</td><td>'+sh.payment_mode+' Rs '+sh.cod_amount+' | value Rs '+sh.value+(sh.open_box?' | OPEN-BOX':'')+'</td></tr><tr><td>Rider</td><td>'+(sh.rider?esc(sh.rider.name)+' '+sh.rider.phone:'none')+'</td></tr><tr><td>Slot</td><td>'+(sh.slot?sh.slot.date+' '+sh.slot.window:'none')+'</td></tr><tr><td>OTP (rider sees this)</td><td><b>'+(sh.otp?sh.otp.code:'not issued')+'</b></td></tr><tr><td>NDR</td><td>failed '+sh.ndr.attempts_failed+', re-attempts '+sh.ndr.reattempts+(sh.ndr.open?' (OPEN)':'')+'</td></tr></table>'):'No shipment yet';
+if(!document.getElementById('faults').contains(document.activeElement))document.getElementById('faults').innerHTML=Object.keys(s.faults).map(function(r){var f=s.faults[r];var opts=['none','timeout','malformed','server_error','auth'].concat(r=='delhivery'?['no_rider']:[]);return '<tr><td>'+r+'</td><td><select id="f_'+r+'">'+opts.map(function(o){return '<option'+(o==f.type?' selected':'')+'>'+o+'</option>'}).join('')+'</select></td><td><label><input type="checkbox" id="fo_'+r+'"'+(f.once?' checked':'')+'> once</label></td><td><button class="alt" onclick="setFault(\''+r+'\')">Apply</button></td></tr>'}).join('');
+document.getElementById('outbox').innerHTML=s.outbox.slice().reverse().map(function(m){return '<div class="msg"><span class="pill '+m.mode+'">'+m.mode+'</span> '+m.at.slice(11,19)+' to <b>'+m.to+'</b> '+(m.via!='agent'?'['+m.via+'] ':'')+esc(m.text)+' '+audio(m.audio_url)+'</div>'}).join('')||'none';
+document.getElementById('inbox').innerHTML=s.inbox.slice().reverse().map(function(m){return '<div class="msg">'+m.at.slice(11,19)+' from <b>'+m.from+'</b> ['+m.source+'] '+(m.read?'':'<span class="pill">unread</span> ')+esc(m.text)+' '+audio(m.audio_url)+'</div>'}).join('')||'none';
+document.getElementById('log').innerHTML='<tr><th>time</th><th>rail</th><th>action</th><th>input</th><th>output</th></tr>'+s.log.slice().reverse().map(function(e){return '<tr><td>'+e.ts.slice(11,19)+'</td><td>'+e.rail+'</td><td>'+esc(e.action)+'</td><td>'+esc(e.input)+'</td><td>'+esc(e.output)+'</td></tr>'}).join('');}
+function setMode(m){if(m=='live'&&!confirm('Live mode sends real WhatsApp messages and spends your Twilio budget. Continue?'))return;api('wa',{mode:m}).then(load)}
+function setBudget(){api('wa',{budget:document.getElementById('budget').value}).then(load)}
+function saveContacts(){api('contacts',{contacts:S.contacts.map(function(c,i){return Object.assign({},c,{name:document.getElementById('cn'+i).value,language:document.getElementById('cl'+i).value,phone:document.getElementById('cp'+i).value})})}).then(load)}
+function createShip(){api('shipment',{item:v('s_item'),seller:v('s_seller'),value:v('s_value'),cod_amount:v('s_cod'),open_box:document.getElementById('s_open').checked,waybill:v('s_wb')||undefined}).then(function(s){load();setTimeout(function(){document.getElementById('wbsel').value=s.waybill;render()},400)})}
+function v(id){return document.getElementById(id).value}
+function wbv(){return document.getElementById('wbsel').value}
+function st(x){api('status',{waybill:wbv(),status:x}).then(load)}
+function ndr(){var r=prompt('Reason','Consignee Unavailable');if(r)api('status',{waybill:wbv(),status:'NDR',reason:r}).then(load)}
+function deliver(){api('status',{waybill:wbv(),status:'Delivered',otp:v('otpin')}).then(function(r){if(r&&r.ok===false)alert(r.error);load()})}
+function setFault(r){api('fault',{rail:r,type:v('f_'+r),once:document.getElementById('fo_'+r).checked}).then(load)}
+function sendText(){var f=v('vfrom');api('inbound',f=='stranger'?{phone:'919999900000',text:v('vtext')}:{from:f,text:v('vtext')}).then(function(){document.getElementById('vtext').value='';load()})}
+function sendVoice(){var file=document.getElementById('vfile').files[0];if(!file)return alert('Pick an audio file');var rd=new FileReader();rd.onload=function(){var b64=rd.result.split(',')[1];api('inbound',{from:v('vfrom'),audio_b64:b64,audio_mime:file.type||'audio/ogg'}).then(load)};rd.readAsDataURL(file)}
+function selftest(t){var b={target:t};if(t=='whatsapp'){var to=prompt('Send 1 LIVE test message to which contact key?','user');if(!to)return;b.to=to;b.confirm=true}document.getElementById('testout').textContent='running...';api('selftest',b).then(function(r){document.getElementById('testout').innerHTML=esc(JSON.stringify(r,null,2))+((r.tts&&r.tts.audio_url)?'<br>'+audio(r.tts.audio_url):'');load()})}
+function dl(){var a=document.createElement('a');a.href=URL.createObjectURL(new Blob([JSON.stringify(S.log,null,2)],{type:'application/json'}));a.download='counterpart-log.json';a.click()}
+function resetAll(){if(confirm('Clear shipments, inbox, outbox, log and faults?'))api('reset',{}).then(load)}
+load();setInterval(function(){if(!document.querySelector('#contacts input:focus'))load()},4000);
+</script></body></html>
