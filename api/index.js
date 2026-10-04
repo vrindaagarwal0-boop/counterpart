@@ -27,19 +27,6 @@ CONNECTORS.rails = {
   tools: [...prefixed('delhivery', dl.tools), ...prefixed('gnani', gnani.tools), ...prefixed('google', google.tools), ...prefixed('whatsapp', wa.tools), ...prefixed('pinelabs', pl.tools)],
 };
 
-
-
-// One combined connector with every tool, prefixed by rail. AgenticOrg currently
-// accepts tools from only one MCP connector per agent, so the agent uses this one.
-const prefixed = (rail, tools) => tools.map((t) => ({ ...t, name: `${rail}_${t.name}` }));
-CONNECTORS.rails = {
-  name: 'counterpart-rails',
-  instructions: 'All cOunTerPart rails in one connector: Delhivery (mock + 3 BUILD), Gnani, Google, WhatsApp.',
-  tools: [...prefixed('delhivery', dl.tools), ...prefixed('gnani', gnani.tools), ...prefixed('google', google.tools), ...prefixed('whatsapp', wa.tools)],
-};
-
-
-
 export default async function handler(req, res) {
   const url = new URL(req.url, 'http://local');
   const path = url.pathname;
