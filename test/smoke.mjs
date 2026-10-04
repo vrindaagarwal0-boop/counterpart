@@ -108,7 +108,9 @@ res = await call('delhivery', 'track_shipment', { waybill: wb }); check('timeout
 
 // Pine Labs mock
 r = await rpc('rails', 'tools/list', {}); const railNames = r.json.result.tools.map((x) => x.name);
-check(`rails has 19 tools (${railNames.length})`, railNames.length === 19);
+check(`rails has 20 tools (${railNames.length})`, railNames.length === 20);
+let vn = parse(await call('rails', 'whatsapp_send_voice_note', { to: 'maa', text: 'Parcel aaj aayega', language_code: 'hi-IN' }));
+check('voice_note falls back to text without Gnani', vn && vn.fallback === true && vn.mode === 'dry_run', JSON.stringify(vn));
 check('rails has pinelabs + send_email', ['pinelabs_create_payment_link', 'pinelabs_get_payment_link', 'google_send_email'].every((x) => railNames.includes(x)));
 let pr = parse(await call('rails', 'pinelabs_create_payment_link', { amount_inr: 1299, description: 'Myntra kurta COD', reference: wb }));
 check('paylink created', pr.status === 'CREATED' && pr.amount.value === 129900 && /^pl-v1-/.test(pr.payment_link_id), JSON.stringify(pr));
