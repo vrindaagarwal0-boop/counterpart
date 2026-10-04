@@ -40,8 +40,11 @@ pre{font-size:11px;white-space:pre-wrap;background:#f4f6fa;padding:6px;border-ra
 <label>OTP from receiver <input id="otpin" size="5"></label><button onclick="deliver()">Mark delivered</button>
 </div></section>
 
+<section><h2>3b. Pine Labs payment links (mock)</h2><table id="paylinks"></table>
+<div style="font-size:11px;color:#667">The user pays by opening the link from WhatsApp. "Mark paid" does the same from here.</div></section>
+
 <section><h2>4. Fault switches</h2><table id="faults"></table>
-<div style="font-size:11px;color:#667">timeout = waits 12s (platform times out). malformed = broken JSON. no_rider = Delhivery shows no delivery agent. "Once" clears after one call.</div></section>
+<div style="font-size:11px;color:#667">timeout = waits 12s (platform times out). malformed = broken JSON. no_rider = Delhivery shows no delivery agent. expired = Pine Labs link reads EXPIRED. "Once" clears after one call.</div></section>
 
 <section><h2>5. Virtual phones (dry-run testing)</h2>
 <label>From <select id="vfrom"></select></label> <input id="vtext" placeholder="Type a reply" size="28">
@@ -73,7 +76,8 @@ var vf=document.getElementById('vfrom'),vfc=vf.value;vf.innerHTML=s.contacts.map
 var sel=document.getElementById('wbsel'),cur=sel.value;sel.innerHTML=s.shipments.map(function(x){return '<option>'+x.waybill+'</option>'}).join('');if(cur)sel.value=cur;
 var sh=s.shipments.find(function(x){return x.waybill==sel.value});
 document.getElementById('shipview').innerHTML=sh?('<table><tr><td>Status</td><td><b>'+sh.status+'</b> ('+esc(sh.instructions)+')</td></tr><tr><td>Consignee</td><td>'+esc(sh.consignee.name)+' '+sh.consignee.phone+'</td></tr><tr><td>Payment</td><td>'+sh.payment_mode+' Rs '+sh.cod_amount+' | value Rs '+sh.value+(sh.open_box?' | OPEN-BOX':'')+'</td></tr><tr><td>Rider</td><td>'+(sh.rider?esc(sh.rider.name)+' '+sh.rider.phone:'none')+'</td></tr><tr><td>Slot</td><td>'+(sh.slot?sh.slot.date+' '+sh.slot.window:'none')+'</td></tr><tr><td>OTP (rider sees this)</td><td><b>'+(sh.otp?sh.otp.code:'not issued')+'</b></td></tr><tr><td>NDR</td><td>failed '+sh.ndr.attempts_failed+', re-attempts '+sh.ndr.reattempts+(sh.ndr.open?' (OPEN)':'')+'</td></tr></table>'):'No shipment yet';
-if(!document.getElementById('faults').contains(document.activeElement))document.getElementById('faults').innerHTML=Object.keys(s.faults).map(function(r){var f=s.faults[r];var opts=['none','timeout','malformed','server_error','auth'].concat(r=='delhivery'?['no_rider']:[]);return '<tr><td>'+r+'</td><td><select id="f_'+r+'">'+opts.map(function(o){return '<option'+(o==f.type?' selected':'')+'>'+o+'</option>'}).join('')+'</select></td><td><label><input type="checkbox" id="fo_'+r+'"'+(f.once?' checked':'')+'> once</label></td><td><button class="alt" onclick="setFault(\''+r+'\')">Apply</button></td></tr>'}).join('');
+if(!document.getElementById('faults').contains(document.activeElement))document.getElementById('faults').innerHTML=Object.keys(s.faults).map(function(r){var f=s.faults[r];var opts=['none','timeout','malformed','server_error','auth'].concat(r=='delhivery'?['no_rider']:r=='pinelabs'?['expired']:[]);return '<tr><td>'+r+'</td><td><select id="f_'+r+'">'+opts.map(function(o){return '<option'+(o==f.type?' selected':'')+'>'+o+'</option>'}).join('')+'</select></td><td><label><input type="checkbox" id="fo_'+r+'"'+(f.once?' checked':'')+'> once</label></td><td><button class="alt" onclick="setFault(\''+r+'\')">Apply</button></td></tr>'}).join('');
+document.getElementById('paylinks').innerHTML='<tr><th>link id</th><th>ref</th><th>amount</th><th>status</th><th></th></tr>'+(s.paylinks||[]).slice().reverse().map(function(l){return '<tr><td><a href="'+l.payment_link+'" target="_blank">'+l.payment_link_id+'</a></td><td>'+esc(l.merchant_payment_link_reference)+'</td><td>Rs '+(l.amount.value/100)+'</td><td><b>'+l.status+'</b></td><td>'+(l.status=='CREATED'?'<button class="alt" onclick="payLink(\''+l.payment_link_id+'\')">Mark paid</button>':'')+'</td></tr>'}).join('');
 document.getElementById('outbox').innerHTML=s.outbox.slice().reverse().map(function(m){return '<div class="msg"><span class="pill '+m.mode+'">'+m.mode+'</span> '+m.at.slice(11,19)+' to <b>'+m.to+'</b> '+(m.via!='agent'?'['+m.via+'] ':'')+esc(m.text)+' '+audio(m.audio_url)+'</div>'}).join('')||'none';
 document.getElementById('inbox').innerHTML=s.inbox.slice().reverse().map(function(m){return '<div class="msg">'+m.at.slice(11,19)+' from <b>'+m.from+'</b> ['+m.source+'] '+(m.read?'':'<span class="pill">unread</span> ')+esc(m.text)+' '+audio(m.audio_url)+'</div>'}).join('')||'none';
 document.getElementById('log').innerHTML='<tr><th>time</th><th>rail</th><th>action</th><th>input</th><th>output</th></tr>'+s.log.slice().reverse().map(function(e){return '<tr><td>'+e.ts.slice(11,19)+'</td><td>'+e.rail+'</td><td>'+esc(e.action)+'</td><td>'+esc(e.input)+'</td><td>'+esc(e.output)+'</td></tr>'}).join('');}
@@ -86,6 +90,7 @@ function wbv(){return document.getElementById('wbsel').value}
 function st(x){api('status',{waybill:wbv(),status:x}).then(load)}
 function ndr(){var r=prompt('Reason','Consignee Unavailable');if(r)api('status',{waybill:wbv(),status:'NDR',reason:r}).then(load)}
 function deliver(){api('status',{waybill:wbv(),status:'Delivered',otp:v('otpin')}).then(function(r){if(r&&r.ok===false)alert(r.error);load()})}
+function payLink(id){api('paylink',{id:id}).then(function(r){if(r&&r.ok===false)alert(r.error);load()})}
 function setFault(r){api('fault',{rail:r,type:v('f_'+r),once:document.getElementById('fo_'+r).checked}).then(load)}
 function sendText(){var f=v('vfrom');api('inbound',f=='stranger'?{phone:'919999900000',text:v('vtext')}:{from:f,text:v('vtext')}).then(function(){document.getElementById('vtext').value='';load()})}
 function sendVoice(){var file=document.getElementById('vfile').files[0];if(!file)return alert('Pick an audio file');var rd=new FileReader();rd.onload=function(){var b64=rd.result.split(',')[1];api('inbound',{from:v('vfrom'),audio_b64:b64,audio_mime:file.type||'audio/ogg'}).then(load)};rd.readAsDataURL(file)}

@@ -17,7 +17,7 @@ let r = await rpc('delhivery', 'initialize', { protocolVersion: '2025-06-18', ca
 check('initialize echoes protocol', r.json.result.protocolVersion === '2025-06-18');
 r = await fetch(`${B}/mcp/delhivery`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'x-api-key': K }, body: JSON.stringify({ jsonrpc: '2.0', method: 'notifications/initialized' }) });
 check('notification -> 202', r.status === 202);
-for (const c of ['delhivery', 'gnani', 'google', 'whatsapp']) { r = await rpc(c, 'tools/list', {}); check(`tools/list ${c} (${r.json.result.tools.length})`, r.json.result.tools.length > 0); }
+for (const c of ['delhivery', 'gnani', 'google', 'whatsapp', 'pinelabs']) { r = await rpc(c, 'tools/list', {}); check(`tools/list ${c} (${r.json.result.tools.length})`, r.json.result.tools.length > 0); }
 r = await rpc('delhivery', 'tools/list', {}, 'wrong'); check('bad key -> 401', r.status === 401);
 r = await rpc('delhivery', 'tools/call', { name: 'nope', arguments: {} }); check('unknown tool error', r.json.error?.code === -32602);
 let res = await call('delhivery', 'track_shipment', {}); check('missing arg -> isError', res.isError === true);
@@ -41,9 +41,9 @@ check('edit consignee ok', parse(res).status === true);
 res = await call('delhivery', 'book_slot', { waybill: wb, date: '2026-10-04', window: '15:00-18:00' });
 check('book slot ok', parse(res).status === true);
 // REST endpoint with Delhivery-style auth
-let rr = await fetch(`${B}/api/v1/packages/json/?waybill=${wb}`, { headers: { Authorization: `Token ${K}` } });
-check('REST track with Token auth', rr.status === 200 && (await rr.json()).ShipmentData[0].Shipment.AWB === wb);
-rr = await fetch(`${B}/api/v1/packages/json/?waybill=${wb}`); check('REST no auth -> 401', rr.status === 401);
+let prr = await fetch(`${B}/api/v1/packages/json/?waybill=${wb}`, { headers: { Authorization: `Token ${K}` } });
+check('REST track with Token auth', prr.status === 200 && (await prr.json()).ShipmentData[0].Shipment.AWB === wb);
+prr = await fetch(`${B}/api/v1/packages/json/?waybill=${wb}`); check('REST no auth -> 401', prr.status === 401);
 
 res = await call('delhivery', 'issue_delegate_otp', { waybill: wb }); check('OTP refused before dispatch', res.isError === true);
 await panel('status', { waybill: wb, status: 'Dispatched' });
@@ -101,6 +101,39 @@ t = parse(await call('delhivery', 'track_shipment', { waybill: s3.waybill })); c
 await panel('fault', { rail: 'delhivery', type: 'none' });
 const t0 = Date.now(); await panel('fault', { rail: 'delhivery', type: 'timeout', once: true });
 res = await call('delhivery', 'track_shipment', { waybill: wb }); check('timeout waits ~12s', Date.now() - t0 > 11000 && res.isError);
+
+// Pine Labs mock
+r = await rpc('rails', 'tools/list', {}); const railNames = r.json.result.tools.map((x) => x.name);
+check(`rails has 19 tools (${railNames.length})`, railNames.length === 19);
+check('rails has pinelabs + send_email', ['pinelabs_create_payment_link', 'pinelabs_get_payment_link', 'google_send_email'].every((x) => railNames.includes(x)));
+let pr = parse(await call('rails', 'pinelabs_create_payment_link', { amount_inr: 1299, description: 'Myntra kurta COD', reference: wb }));
+check('paylink created', pr.status === 'CREATED' && pr.amount.value === 129900 && /^pl-v1-/.test(pr.payment_link_id), JSON.stringify(pr));
+check('paylink url points to /pay/', pr.payment_link.includes('/pay/' + pr.payment_link_id));
+const plid = pr.payment_link_id;
+res = await call('pinelabs', 'create_payment_link', { amount_inr: 0.5, reference: wb }); check('paylink tiny amount -> isError', res.isError === true);
+let phr = await (await fetch(`${B}/pay/${plid}`)).text(); check('checkout page shows amount', phr.includes('Rs 1,299') && phr.includes('<form'));
+prr = await fetch(`${B}/api/pay/v1/paymentlink/${plid}`, { headers: { Authorization: `Bearer ${K}` } }); let prj = await prr.json();
+check('REST GET paylink CREATED', prr.status === 200 && prj.status === 'CREATED');
+prr = await fetch(`${B}/api/pay/v1/paymentlink/${plid}`); check('REST paylink needs auth', prr.status === 401);
+phr = await (await fetch(`${B}/pay/${plid}`, { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: '' })).text();
+check('checkout POST pays', phr.includes('Payment successful'));
+pr = parse(await call('pinelabs', 'get_payment_link', { payment_link_id: plid })); check('paylink PROCESSED after pay', pr.status === 'PROCESSED' && pr.payment?.method === 'UPI');
+prr = await fetch(`${B}/api/pay/v1/paymentlink/${plid}/cancel`, { method: 'PUT', headers: { Authorization: `Token ${K}` } }); check('cannot cancel paid link', prr.status === 400);
+const pl2 = parse(await call('pinelabs', 'create_payment_link', { amount_inr: 500, reference: 'X1' })).payment_link_id;
+prr = await fetch(`${B}/api/pay/v1/paymentlink/${pl2}/cancel`, { method: 'PUT', headers: { Authorization: `Token ${K}` } }); check('cancel CREATED link', (await prr.json()).status === 'CANCELLED');
+const pl3 = parse(await call('pinelabs', 'create_payment_link', { amount_inr: 700, reference: 'X2' })).payment_link_id;
+let pp = await panel('paylink', { id: pl3 }); check('panel mark paid', pp.ok === true);
+pp = await panel('paylink', { id: pl3 }); check('panel mark paid twice refused', pp.ok === false);
+res = await call('pinelabs', 'get_payment_link', { payment_link_id: 'pl-v1-nope' }); check('unknown paylink -> isError', res.isError === true);
+await panel('fault', { rail: 'pinelabs', type: 'malformed', once: true });
+res = await call('pinelabs', 'get_payment_link', { payment_link_id: plid }); check('pinelabs malformed passed through', parse(res) === null);
+res = await call('pinelabs', 'get_payment_link', { payment_link_id: plid }); check('pinelabs once-fault cleared', parse(res)?.status === 'PROCESSED');
+await panel('fault', { rail: 'pinelabs', type: 'expired', once: true });
+pr = parse(await call('pinelabs', 'create_payment_link', { amount_inr: 1299, reference: 'X3' })); check('expired fault -> link EXPIRED', pr.status === 'EXPIRED');
+await panel('fault', { rail: 'pinelabs', type: 'auth', once: true });
+res = await call('pinelabs', 'get_payment_link', { payment_link_id: plid }); check('pinelabs auth fault -> isError', res.isError === true);
+let stp = await panel('state'); check('panel lists paylinks', stp.paylinks.length >= 4 && 'pinelabs' in stp.faults);
+res = await call('rails', 'google_send_email', { subject: '[cOunTerPart LOG] AWB 1 S1', body: 'x' }); check('send_email graceful without network', res.isError === true);
 
 // External rails fail gracefully without network
 res = await call('google', 'search_emails', { query: 'Delhivery' }); check('google error is graceful', res.isError === true);
