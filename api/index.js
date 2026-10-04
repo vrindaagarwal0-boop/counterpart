@@ -31,6 +31,7 @@ export default async function handler(req, res) {
   const url = new URL(req.url, 'http://local');
   const path = url.pathname;
   const ctx = { baseUrl: baseUrl(req) };
+  globalThis.__baseUrl = ctx.baseUrl;
   try {
     if (req.method === 'OPTIONS') {
       res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, x-api-key, Mcp-Session-Id, Mcp-Protocol-Version');
