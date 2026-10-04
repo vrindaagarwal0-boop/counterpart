@@ -38,6 +38,10 @@ let t = parse(res); check('track Manifested', t.ShipmentData[0].Shipment.Status.
 check('track masks phone', t.ShipmentData[0].Shipment.Consignee.Telephone1.includes('******'));
 res = await call('delhivery', 'edit_shipment', { waybill: wb, name: 'Maa', phone: '9822222222' });
 check('edit consignee ok', parse(res).status === true);
+res = await call('delhivery', 'edit_shipment', { waybill: wb, name: 'maa', phone: 'maa', pt: null, cod: null, add: null });
+let ed = parse(res); check('edit with key + nulls keeps COD', ed.status === true && ed.updated.cod === undefined && ed.updated.name === 'Maa' && ed.updated.phone.includes('*'), JSON.stringify(ed));
+t = parse(await call('delhivery', 'track_shipment', { waybill: wb })); check('COD still 1299 after null edit', t.ShipmentData[0].Shipment.CODAmount === 1299, JSON.stringify(t.ShipmentData[0].Shipment.CODAmount));
+res = await call('delhivery', 'edit_shipment', { waybill: wb, phone: 'stranger' }); check('edit unknown contact refused', res.isError === true);
 res = await call('delhivery', 'book_slot', { waybill: wb, date: '2026-10-04', window: '15:00-18:00' });
 check('book slot ok', parse(res).status === true);
 // REST endpoint with Delhivery-style auth
